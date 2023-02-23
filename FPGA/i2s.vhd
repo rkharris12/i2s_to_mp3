@@ -12,15 +12,18 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity i2s is
     port (
-        I2S_LRCK   : in  std_logic;
-        I2S_BCK    : in  std_logic;
-        I2S_DATA   : in  std_logic;
-        ARST_I2S_N : in  std_logic;
-        SRST_I2S   : in  std_logic;
-        CLK_AVL    : in  std_logic;
-        ARST_AVL_N : in  std_logic;
-        LRCK_CNT   : out std_logic_vector(31 downto 0);
-        BCK_CNT    : out std_logic_vector(31 downto 0)
+        I2S_LRCK        : in  std_logic;
+        I2S_BCK         : in  std_logic;
+        I2S_DATA        : in  std_logic;
+        ARST_I2S_N      : in  std_logic;
+        SRST_I2S        : in  std_logic;
+        CLK_AVL         : in  std_logic;
+        ARST_AVL_N      : in  std_logic;
+        DONE            : out std_logic;
+        SAMPLE_DATA_ACK : in std_logic;
+        SAMPLE_DATA     : out std_logic_vector(31 downto 0);
+        LRCK_CNT        : out std_logic_vector(31 downto 0);
+        BCK_CNT         : out std_logic_vector(31 downto 0)
     );
 end i2s;
 
@@ -60,11 +63,12 @@ architecture rtl of i2s is
     i2s_lrck_left    : std_logic;
     i2s_lrck_toggle  : std_logic;
     i2s_shift_cnt    : unsigned(4 downto 0);
-    type state_type is (E_IDLE, E_CAPTURE, E_DONE);
+    type state_type  is (E_IDLE, E_CAPTURE, E_DONE);
     signal state     : state_type;
     sample_mem_we    : std_logic;
     sample_mem_waddr : unsigned(15 downto 0);
     sample_mem_data  : std_logic_vector(31 downto 0);
+    sample_mem_raddr : unsigned(15 downto 0);
     done_i           : std_logic;
     done_sr          : std_logic_vector(1 downto 0);
 
@@ -75,18 +79,15 @@ architecture rtl of i2s is
 
 begin
 
-    -- block RAM to store audio samples
-    u_sample_mem : sample_mem
-        port map ( 
-            clka   => I2S_BCK,
-            ena    => '1',
-            wea(0) => sample_mem_we,
-            addra  => std_logic_vector(sample_mem_waddr),
-            dina   => sample_mem_data,
-            clkb   => CLK_AVL,
-            enb    => '1',
-            addrb  => (others => '0'),
-            doutb  => open);
+    -- detect left/right channel change
+    process(I2S_BCK) begin
+        if rising_edge(I2S_BCK) then
+            i2s_lrck_d1 <= I2S_LRCK;
+        end if;
+    end process;
+
+    i2s_lrck_toggle <= I2S_LRCK xor i2s_lrck_d1;
+    i2s_lrck_left   <= '1' when (I2S_LRCK = '0' and i2s_lrck_d1 = '1') else '0';
 
     -- capture audio samples
     process(I2S_BCK, ARST_I2S_N) begin
@@ -137,15 +138,29 @@ begin
         end if;
     end process;
 
-    -- detect left/right channel change
-    process(I2S_BCK) begin
-        if rising_edge(I2S_BCK) then
-            i2s_lrck_d1 <= I2S_LRCK;
+    -- block RAM to store audio samples
+    u_sample_mem : sample_mem
+        port map ( 
+            clka   => I2S_BCK,
+            ena    => '1',
+            wea(0) => sample_mem_we,
+            addra  => std_logic_vector(sample_mem_waddr),
+            dina   => sample_mem_data,
+            clkb   => CLK_AVL,
+            enb    => '1',
+            addrb  => std_logic_vector(sample_mem_raddr),
+            doutb  => SAMPLE_DATA);
+
+    -- transfer captured audio data
+    process(CLK_AVL, ARST_AVL_N) begin
+        if (ARST_AVL_N = '0') then
+            sample_mem_raddr <= (others => '0');
+        elsif rising_edge(CLK_AVL) then
+            if (SAMPLE_DATA_ACK = '1') then
+                sample_mem_raddr <= sample_mem_raddr + 1;
+            end if;
         end if;
     end process;
-
-    i2s_lrck_toggle <= I2S_LRCK xor i2s_lrck_d1;
-    i2s_lrck_left   <= '1' when (I2S_LRCK = '0' and i2s_lrck_d1 = '1') else '0';
     
     -- debug counters
     process(I2S_BCK, ARST_I2S_N) begin

@@ -12,9 +12,9 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity i2s_to_mp3 is
     port (
-        I2S_LRCK : in std_logic; -- GPIO 22 on ESP
-        I2S_BCK  : in std_logic; -- GPIO 21 on ESP
-        I2S_DATA : in std_logic -- GPIO 23 on ESP
+        I2S_LRCK : in std_logic; -- GPIO 22 on ESP -> A2
+        I2S_BCK  : in std_logic; -- GPIO 21 on ESP -> A5
+        I2S_DATA : in std_logic -- GPIO 23 on ESP -> A1
     );
 end i2s_to_mp3;
 
@@ -35,11 +35,11 @@ architecture rtl of i2s_to_mp3 is
             S_AVALON_address       : in  std_logic_vector(31 downto 0);
             S_AVALON_burstcount    : in  std_logic_vector(10 downto 0);
             S_AVALON_read          : in  std_logic;
-            S_AVALON_readdata      : out std_logic_vector(63 downto 0);
+            S_AVALON_readdata      : out std_logic_vector(31 downto 0);
             S_AVALON_readdatavalid : out std_logic;
             S_AVALON_waitrequest   : out std_logic;
             S_AVALON_write         : in  std_logic;
-            S_AVALON_writedata     : in  std_logic_vector(63 downto 0)
+            S_AVALON_writedata     : in  std_logic_vector(31 downto 0)
         );
     end component;
 
@@ -97,11 +97,11 @@ architecture rtl of i2s_to_mp3 is
     signal s_avalon_address        : std_logic_vector(31 downto 0);
     signal s_avalon_burstcount     : std_logic_vector(10 downto 0);
     signal s_avalon_read           : std_logic;
-    signal s_avalon_readdata       : std_logic_vector(63 downto 0);
+    signal s_avalon_readdata       : std_logic_vector(31 downto 0);
     signal s_avalon_readdatavalid  : std_logic;
     signal s_avalon_waitrequest    : std_logic;
     signal s_avalon_write          : std_logic;
-    signal s_avalon_writedata      : std_logic_vector(63 downto 0);
+    signal s_avalon_writedata      : std_logic_vector(31 downto 0);
 
     type state_type                is (E_IDLE, E_DELAY, E_WRITE, E_DONE);
     signal state                   : state_type;
@@ -149,9 +149,7 @@ begin
             S_AVALON_writedata     => s_avalon_writedata);
 
     -- memory interface
-    s_avalon_address    <= (others => '0');
-    s_avalon_burstcount <= (others => '0');
-    s_avalon_read       <= '0';
+    s_avalon_read <= '0';
 
     -- write the captured audio data to the processor memory
     process(clk_avalon, arst_avalon_n) begin
@@ -163,7 +161,7 @@ begin
             s_avalon_waitrequest_d1 <= '0';
             s_avalon_write          <= '0';
             s_avalon_writedata      <= (others => '0');
-        elsif rising_edge(clk_avalon) begin
+        elsif rising_edge(clk_avalon) then
             s_avalon_waitrequest_d1 <= s_avalon_waitrequest;
 
             if (not (s_avalon_waitrequest = '1' and s_avalon_waitrequest_d1 = '1')) then
@@ -246,9 +244,9 @@ begin
                         when 3 =>
                             m_avalon_readdata <= (0 => transfer_done, others => '0');
                         when 4 =>
-                            m_avalon_readata <= lrck_cnt;
+                            m_avalon_readdata <= lrck_cnt;
                         when 5 =>
-                            m_avalon_readata <= bck_cnt;
+                            m_avalon_readdata <= bck_cnt;
                         when others =>
                             null;
                     end case;

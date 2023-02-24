@@ -59,23 +59,23 @@ architecture rtl of i2s is
         );
     end component;
 
-    i2s_lrck_d1      : std_logic;
-    i2s_lrck_left    : std_logic;
-    i2s_lrck_toggle  : std_logic;
-    i2s_shift_cnt    : unsigned(4 downto 0);
-    type state_type  is (E_IDLE, E_CAPTURE, E_DONE);
-    signal state     : state_type;
-    sample_mem_we    : std_logic;
-    sample_mem_waddr : unsigned(15 downto 0);
-    sample_mem_data  : std_logic_vector(31 downto 0);
-    sample_mem_raddr : unsigned(15 downto 0);
-    done_i           : std_logic;
-    done_sr          : std_logic_vector(1 downto 0);
+    signal i2s_lrck_d1      : std_logic;
+    signal i2s_lrck_left    : std_logic;
+    signal i2s_lrck_toggle  : std_logic;
+    signal i2s_shift_cnt    : unsigned(4 downto 0);
+    type state_type         is (E_IDLE, E_CAPTURE, E_DONE);
+    signal state            : state_type;
+    signal sample_mem_we    : std_logic;
+    signal sample_mem_waddr : unsigned(15 downto 0);
+    signal sample_mem_data  : std_logic_vector(31 downto 0);
+    signal sample_mem_raddr : unsigned(15 downto 0);
+    signal done_i           : std_logic;
+    signal done_sr          : std_logic_vector(1 downto 0);
 
-    lrck_cnt_i2s     : unsigned(31 downto 0);
-    bck_cnt_i2s      : unsigned(31 downto 0);
-    bck_cnt_cdc_en   : std_logic;
-    lrck_cnt_cdc_en  : std_logic;
+    signal lrck_cnt_i2s     : unsigned(31 downto 0);
+    signal bck_cnt_i2s      : unsigned(31 downto 0);
+    signal bck_cnt_cdc_en   : std_logic;
+    signal lrck_cnt_cdc_en  : std_logic;
 
 begin
 
@@ -168,7 +168,7 @@ begin
             bck_cnt_cdc_en  <= '0';
             lrck_cnt_cdc_en <= '0';
             lrck_cnt_i2s    <= (others => '0');
-            bck_cnt_i2s     <= (others => 0);
+            bck_cnt_i2s     <= (others => '0');
         elsif rising_edge(I2S_BCK) then
             bck_cnt_cdc_en  <= '0';
             lrck_cnt_cdc_en <= '0';
@@ -179,7 +179,7 @@ begin
             end if;
 
             if (i2s_lrck_toggle = '1') then
-                lrck_cnt_i      <= lrck_cnt_i + 1;
+                lrck_cnt_i2s    <= lrck_cnt_i2s + 1;
                 lrck_cnt_cdc_en <= '1';
             end if;
         end if;
@@ -203,7 +203,7 @@ begin
             ARST_IN_N  => ARST_I2S_N,
             CLK_OUT    => CLK_AVL,
             ARST_OUT_N => ARST_AVL_N,
-            DIN        => bck_cnt_i2s,
+            DIN        => std_logic_vector(bck_cnt_i2s),
             DIN_EN     => bck_cnt_cdc_en,
             DOUT       => BCK_CNT,
             DOUT_EN    => open);
@@ -216,7 +216,7 @@ begin
             ARST_IN_N  => ARST_I2S_N,
             CLK_OUT    => CLK_AVL,
             ARST_OUT_N => ARST_AVL_N,
-            DIN        => lrck_cnt_i2s,
+            DIN        => std_logic_vector(lrck_cnt_i2s),
             DIN_EN     => lrck_cnt_cdc_en,
             DOUT       => LRCK_CNT,
             DOUT_EN    => open);

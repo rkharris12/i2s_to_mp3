@@ -48,18 +48,17 @@ architecture rtl of i2s_to_mp3 is
 
     component i2s is
         port (
-            I2S_LRCK        : in  std_logic;
-            I2S_BCK         : in  std_logic;
-            I2S_DATA        : in  std_logic;
-            ARST_I2S_N      : in  std_logic;
-            CLK_AVL         : in  std_logic;
-            ARST_AVL_N      : in  std_logic;
-            START           : in  std_logic;
-            DONE            : out std_logic;
-            SAMPLE_DATA_ACK : in std_logic;
-            SAMPLE_DATA     : out std_logic_vector(31 downto 0);
-            LRCK_CNT        : out std_logic_vector(31 downto 0);
-            BCK_CNT         : out std_logic_vector(31 downto 0)
+            I2S_LRCK    : in  std_logic;
+            I2S_BCK     : in  std_logic;
+            I2S_DATA    : in  std_logic;
+            ARST_I2S_N  : in  std_logic;
+            CLK_AVL     : in  std_logic;
+            ARST_AVL_N  : in  std_logic;
+            SRST_I2S    : in  std_logic;
+            SAMPLE_EN   : out std_logic;
+            SAMPLE_DATA : out std_logic_vector(31 downto 0);
+            LRCK_CNT    : out std_logic_vector(31 downto 0);
+            BCK_CNT     : out std_logic_vector(31 downto 0)
         );
     end component;
 
@@ -82,7 +81,7 @@ architecture rtl of i2s_to_mp3 is
         );
     end component;
 
-    constant C_VERSION             : std_logic_vector(31 downto 0) := x"00000011";
+    constant C_VERSION             : std_logic_vector(31 downto 0) := x"00000012";
 
     signal clk_avalon              : std_logic;
     signal arst_avalon_n           : std_logic;
@@ -106,39 +105,37 @@ architecture rtl of i2s_to_mp3 is
     signal s_avalon_write          : std_logic;
     signal s_avalon_writedata      : std_logic_vector(63 downto 0);
 
-    type state_type                is (E_IDLE, E_DELAY, E_WRITE, E_DONE);
+    type state_type                is (E_IDLE, E_WAIT_1, E_WAIT_2, E_WRITE);
     signal state                   : state_type;
     
     signal address_bank            : std_logic_vector(7 downto 0);
     signal address_offset          : std_logic_vector(7 downto 0);
 
-    signal s_avalon_waitrequest_d1 : std_logic;
-    signal avalon_word_cnt         : unsigned(15 downto 0);
+    signal avalon_word_cnt         : unsigned(31 downto 0);
     signal transfer_done           : std_logic;
     signal transfer_done_latched   : std_logic;
-    signal sample_data_ack         : std_logic;
+    signal sample_en               : std_logic;
     signal sample_data             : std_logic_vector(31 downto 0);
-    signal sample_data_reg         : std_logic_vector(31 downto 0);
 
+    signal capture_start           : std_logic;
     signal capture_base_address    : std_logic_vector(31 downto 0);
-    signal start_i2s_avl           : std_logic;
+    signal capture_size            : std_logic_vector(31 downto 0);
+    signal srst_i2s_avl            : std_logic;
 
-    signal start_i2s               : std_logic;
+    signal srst_i2s                : std_logic;
     signal lrck_cnt                : std_logic_vector(31 downto 0);
     signal bck_cnt                 : std_logic_vector(31 downto 0);
-    signal capture_done            : std_logic;
 
     -- debug
     component ila_i2s is
         Port ( 
             clk : in STD_LOGIC;
             probe0 : in STD_LOGIC_VECTOR ( 31 downto 0 );
-            probe1 : in STD_LOGIC_VECTOR ( 31 downto 0 );
+            probe1 : in STD_LOGIC_VECTOR ( 0 to 0 );
             probe2 : in STD_LOGIC_VECTOR ( 0 to 0 );
-            probe3 : in STD_LOGIC_VECTOR ( 0 to 0 );
-            probe4 : in STD_LOGIC_VECTOR ( 31 downto 0 );
-            probe5 : in STD_LOGIC_VECTOR ( 31 downto 0 );
-            probe6 : in STD_LOGIC_VECTOR ( 0 to 0 )
+            probe3 : in STD_LOGIC_VECTOR ( 31 downto 0 );
+            probe4 : in STD_LOGIC_VECTOR ( 63 downto 0 );
+            probe5 : in STD_LOGIC_VECTOR ( 0 to 0 )
         );
     end component;
 
@@ -150,8 +147,7 @@ architecture rtl of i2s_to_mp3 is
 
     attribute syn_keep : boolean;
     attribute syn_keep of sample_data : signal is true;
-    attribute syn_keep of sample_data_reg : signal is true;
-    attribute syn_keep of sample_data_ack : signal is true;
+    attribute syn_keep of sample_en : signal is true;
     attribute syn_keep of s_avalon_write : signal is true;
     attribute syn_keep of s_avalon_writedata : signal is true;
     attribute syn_keep of s_avalon_address : signal is true;
@@ -164,13 +160,11 @@ begin
         Port map ( 
           clk       => clk_avalon,
           probe0    => sample_data,
-          probe1    => sample_data_reg,
-          probe2(0) => sample_data_ack,
-          probe3(0) => s_avalon_write,
-          probe4    => s_avalon_address,
-          probe5    => s_avalon_writedata(31 downto 0),
-          probe6(0) => s_avalon_waitrequest
-        );
+          probe1(0) => sample_en,
+          probe2(0) => s_avalon_write,
+          probe3    => s_avalon_address,
+          probe4    => s_avalon_writedata,
+          probe5(0) => s_avalon_waitrequest);
 
     -- ESP power and enable
     ESP_EN  <= '1';
@@ -199,70 +193,62 @@ begin
             S_AVALON_writedata     => s_avalon_writedata);
 
     -- memory interface
-    s_avalon_read <= '0';
+    s_avalon_read <= '0'; -- unused
 
     -- write the captured audio data to the processor memory
     process(clk_avalon, arst_avalon_n) begin
         if (arst_avalon_n = '0') then
-            state                   <= E_IDLE;
-            transfer_done           <= '0';
-            avalon_word_cnt         <= (others => '0');
-            sample_data_reg         <= (others => '0');
-            s_avalon_waitrequest_d1 <= '0';
-            s_avalon_write          <= '0';
-            s_avalon_writedata      <= (others => '0');
-            s_avalon_address        <= (others => '0');
-            s_avalon_burstcount     <= (others => '0');
+            state               <= E_IDLE;
+            transfer_done       <= '0';
+            avalon_word_cnt     <= (others => '0');
+            s_avalon_write      <= '0';
+            s_avalon_writedata  <= (others => '0');
+            s_avalon_address    <= (others => '0');
+            s_avalon_burstcount <= (others => '0');
         elsif rising_edge(clk_avalon) then
-            s_avalon_waitrequest_d1 <= s_avalon_waitrequest;
-
             transfer_done <= '0';
-
-            if ((not (s_avalon_waitrequest = '1' and s_avalon_waitrequest_d1 = '1')) or state = E_DELAY) then
-                sample_data_reg <= sample_data;
-            end if;
 
             case (state) is
                 when E_IDLE =>
-                    if (capture_done = '1') then
-                        state               <= E_DELAY;
+                    if (capture_start = '1') then
+                        state               <= E_WAIT_1;
                         s_avalon_address    <= capture_base_address;
                         s_avalon_burstcount <= std_logic_vector(to_unsigned(1, s_avalon_burstcount'length)); -- no burst writes
                     end if;
 
-                when E_DELAY =>
-                    state              <= E_WRITE;
-                    s_avalon_write     <= '1';
-                    s_avalon_writedata <= x"1234567812345678";--sample_data;
+                -- note: PS AXI slave doesn't appear to work in 32 bit mode, so using 64-bit mode and 2 samples per write
+                when E_WAIT_1 =>
+                    if (sample_en = '1') then
+                        state                           <= E_WAIT_2;
+                        s_avalon_writedata(31 downto 0) <= sample_data;
+                    end if;
+
+                when E_WAIT_2 =>
+                    if (sample_en = '1') then
+                        state                            <= E_WRITE;
+                        s_avalon_write                   <= '1';
+                        s_avalon_writedata(63 downto 32) <= sample_data;
+                    end if;
 
                 when E_WRITE =>
                     if (s_avalon_waitrequest = '0') then
-                        if (s_avalon_waitrequest_d1 = '1') then
-                            s_avalon_writedata <= x"1234567812345678";--sample_data_reg;
-                        else
-                            s_avalon_writedata <= x"1234567812345678";--sample_data;
-                        end if;
                         s_avalon_address <= std_logic_vector(unsigned(s_avalon_address) + 8);
-                        avalon_word_cnt  <= avalon_word_cnt + 1;
-                        if (avalon_word_cnt = 65535) then
-                            state           <= E_DONE;
+                        avalon_word_cnt  <= avalon_word_cnt + 2;
+                        s_avalon_write   <= '0';
+                        if (avalon_word_cnt >= unsigned(capture_size)) then
+                            state           <= E_IDLE;
+                            transfer_done   <= '1';
                             avalon_word_cnt <= (others => '0');
-                            s_avalon_write  <= '0';
+                        else
+                            state <= E_WAIT_1;
                         end if;
                     end if;
-                
-                when E_DONE =>
-                    state         <= E_IDLE;
-                    transfer_done <= '1';
                     
                 when others =>
                     null;
             end case;
         end if;
     end process;
-
-    -- ack data from i2s sample buffer
-    sample_data_ack <= '1' when ((state = E_IDLE and capture_done = '1') or (state = E_WRITE and s_avalon_waitrequest = '0')) else '0';
 
     -- register interface
     m_avalon_waitrequest <= '0'; -- always ready
@@ -275,14 +261,17 @@ begin
         if (arst_avalon_n = '0') then
             m_avalon_readdata      <= (others => '0');
             m_avalon_readdatavalid <= '0';
-            start_i2s_avl          <= '0';
+            srst_i2s_avl           <= '0';
+            capture_start          <= '0';
             capture_base_address   <= (others => '0');
+            capture_size           <= (others => '0');
             transfer_done_latched  <= '0';
         elsif rising_edge(clk_avalon) then
             m_avalon_readdata      <= (others => '0');
             m_avalon_readdatavalid <= '0';
 
-            start_i2s_avl <= '0';
+            capture_start <= '0';
+            srst_i2s_avl  <= '0';
 
             if (transfer_done = '1') then
                 transfer_done_latched <= '1';
@@ -298,13 +287,15 @@ begin
                         when 2 =>
                             m_avalon_readdata <= capture_base_address;
                         when 3 =>
+                            m_avalon_readdata <= capture_size;
+                        when 4 =>
                             m_avalon_readdata <= (0 => transfer_done_latched, others => '0');
                             if (transfer_done_latched = '1') then -- clear latched if processor reads a 1
                                 transfer_done_latched <= '0';
                             end if;
-                        when 4 =>
-                            m_avalon_readdata <= lrck_cnt;
-                        when 5 =>
+                        when 6 =>
+                            mavalon_readdata <= lrck_cnt;
+                        when 7 =>
                             m_avalon_readdata <= bck_cnt;
                         when others =>
                             null;
@@ -315,9 +306,13 @@ begin
                 if (to_integer(unsigned(address_bank)) = 0) then
                     case to_integer(unsigned(address_offset)) is
                         when 1 =>
-                            start_i2s_avl <= m_avalon_writedata(0);
+                            capture_start <= '1';
                         when 2 =>
                             capture_base_address <= m_avalon_writedata;
+                        when 3 =>
+                            capture_size <= m_avalon_writedata;
+                        when 5 =>
+                            srst_i2s_avl <= m_avalon_writedata(0);
                         when others =>
                             null;
                     end case;
@@ -339,8 +334,8 @@ begin
             ARST_IN_N  => arst_avalon_n,
             CLK_OUT    => I2S_BCK,
             ARST_OUT_N => arst_i2s_n,
-            DIN        => start_i2s_avl,
-            DOUT       => start_i2s);
+            DIN        => srst_i2s_avl,
+            DOUT       => srst_i2s);
 
     -- I2S wrapper
     u_i2s : i2s
@@ -351,9 +346,8 @@ begin
             ARST_I2S_N      => arst_i2s_n,
             CLK_AVL         => clk_avalon,
             ARST_AVL_N      => arst_avalon_n,
-            START           => start_i2s,
-            DONE            => capture_done,
-            SAMPLE_DATA_ACK => sample_data_ack,
+            SRST_I2S        => srst_i2s,
+            SAMPLE_EN       => sample_en,
             SAMPLE_DATA     => sample_data,
             LRCK_CNT        => lrck_cnt,
             BCK_CNT         => bck_cnt);

@@ -55,6 +55,7 @@ architecture rtl of i2s_to_mp3 is
             CLK_AVL     : in  std_logic;
             ARST_AVL_N  : in  std_logic;
             SRST_I2S    : in  std_logic;
+            CONFIG      : in  std_logic_vector(1 downto 0);
             SAMPLE_EN   : out std_logic;
             SAMPLE_DATA : out std_logic_vector(31 downto 0);
             LRCK_CNT    : out std_logic_vector(31 downto 0);
@@ -81,7 +82,7 @@ architecture rtl of i2s_to_mp3 is
         );
     end component;
 
-    constant C_VERSION             : std_logic_vector(31 downto 0) := x"00000012";
+    constant C_VERSION             : std_logic_vector(31 downto 0) := x"00000013";
 
     signal clk_avalon              : std_logic;
     signal arst_avalon_n           : std_logic;
@@ -121,6 +122,7 @@ architecture rtl of i2s_to_mp3 is
     signal capture_base_address    : std_logic_vector(31 downto 0);
     signal capture_size            : std_logic_vector(31 downto 0);
     signal srst_i2s_avl            : std_logic;
+    signal i2s_config              : std_logic_vector(1 downto 0);
 
     signal srst_i2s                : std_logic;
     signal lrck_cnt                : std_logic_vector(31 downto 0);
@@ -130,14 +132,15 @@ architecture rtl of i2s_to_mp3 is
     component ila_i2s is
         Port ( 
             clk : in STD_LOGIC;
-            probe0 : in STD_LOGIC_VECTOR ( 31 downto 0 );
+            probe0 : in STD_LOGIC_VECTOR ( 0 to 0 );
             probe1 : in STD_LOGIC_VECTOR ( 0 to 0 );
-            probe2 : in STD_LOGIC_VECTOR ( 0 to 0 );
-            probe3 : in STD_LOGIC_VECTOR ( 31 downto 0 );
-            probe4 : in STD_LOGIC_VECTOR ( 63 downto 0 );
-            probe5 : in STD_LOGIC_VECTOR ( 0 to 0 )
+            probe2 : in STD_LOGIC_VECTOR ( 0 to 0 )
         );
     end component;
+    
+    signal i2s_bck_i   : std_logic;
+    signal i2s_lrck_i  : std_logic;
+    signal i2s_data_i  : std_logic;
 
     attribute syn_black_box : boolean;
     attribute syn_black_box of ila_i2s : component is true;
@@ -146,25 +149,23 @@ architecture rtl of i2s_to_mp3 is
     attribute syn_noprune of ila_i2s : component is true;
 
     attribute syn_keep : boolean;
-    attribute syn_keep of sample_data : signal is true;
-    attribute syn_keep of sample_en : signal is true;
-    attribute syn_keep of s_avalon_write : signal is true;
-    attribute syn_keep of s_avalon_writedata : signal is true;
-    attribute syn_keep of s_avalon_address : signal is true;
-    attribute syn_keep of s_avalon_waitrequest : signal is true;
+    attribute syn_keep of i2s_bck_i : signal is true;
+    attribute syn_keep of i2s_lrck_i : signal is true;
+    attribute syn_keep of i2s_data_i : signal is true;
 
 begin
 
     -- debug
-    u_ila_i2s : ila_i2s
-        Port map ( 
-          clk       => clk_avalon,
-          probe0    => sample_data,
-          probe1(0) => sample_en,
-          probe2(0) => s_avalon_write,
-          probe3    => s_avalon_address,
-          probe4    => s_avalon_writedata,
-          probe5(0) => s_avalon_waitrequest);
+    --u_ila_i2s : ila_i2s
+    --   Port map ( 
+    --      clk       => clk_avalon,
+    --      probe0(0) => i2s_bck_i,
+    --      probe1(0) => i2s_lrck_i,
+    --      probe2(0) => i2s_data_i);
+          
+    i2s_bck_i   <= I2S_BCK;
+    i2s_lrck_i  <= I2S_LRCK;
+    i2s_data_i  <= I2S_DATA;
 
     -- ESP power and enable
     ESP_EN  <= '1';
@@ -266,6 +267,7 @@ begin
             capture_base_address   <= (others => '0');
             capture_size           <= (others => '0');
             transfer_done_latched  <= '0';
+            i2s_config             <= "01"; -- 00 is Philips, 01 is MSB, which is default for the ESP32E
         elsif rising_edge(clk_avalon) then
             m_avalon_readdata      <= (others => '0');
             m_avalon_readdatavalid <= '0';
@@ -294,8 +296,10 @@ begin
                                 transfer_done_latched <= '0';
                             end if;
                         when 6 =>
-                            mavalon_readdata <= lrck_cnt;
+                            m_avalon_readdata <= (1 downto 0 => i2s_config, others => '0');
                         when 7 =>
+                            m_avalon_readdata <= lrck_cnt;
+                        when 8 =>
                             m_avalon_readdata <= bck_cnt;
                         when others =>
                             null;
@@ -313,6 +317,8 @@ begin
                             capture_size <= m_avalon_writedata;
                         when 5 =>
                             srst_i2s_avl <= m_avalon_writedata(0);
+                        when 6 =>
+                            i2s_config <= m_avalon_writedata(1 downto 0);
                         when others =>
                             null;
                     end case;
@@ -347,6 +353,7 @@ begin
             CLK_AVL         => clk_avalon,
             ARST_AVL_N      => arst_avalon_n,
             SRST_I2S        => srst_i2s,
+            CONFIG          => i2s_config,
             SAMPLE_EN       => sample_en,
             SAMPLE_DATA     => sample_data,
             LRCK_CNT        => lrck_cnt,

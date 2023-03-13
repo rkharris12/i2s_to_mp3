@@ -202,6 +202,9 @@ proc create_root_design { parentCell } {
 
   # Create instance: amm_axi_bridge_0, and set properties
   set amm_axi_bridge_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:amm_axi_bridge:1.0 amm_axi_bridge_0 ]
+  set_property -dict [ list \
+   CONFIG.C_AVA_DATA_WIDTH {64} \
+ ] $amm_axi_bridge_0
 
   # Create instance: axi_amm_bridge_0, and set properties
   set axi_amm_bridge_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_amm_bridge:1.0 axi_amm_bridge_0 ]
@@ -232,7 +235,7 @@ proc create_root_design { parentCell } {
    CONFIG.PCW_FPGA_FCLK1_ENABLE {0} \
    CONFIG.PCW_FPGA_FCLK2_ENABLE {0} \
    CONFIG.PCW_FPGA_FCLK3_ENABLE {0} \
-   CONFIG.PCW_S_AXI_HP0_DATA_WIDTH {32} \
+   CONFIG.PCW_S_AXI_HP0_DATA_WIDTH {64} \
    CONFIG.PCW_USE_S_AXI_HP0 {1} \
  ] $processing_system7_0
 

@@ -19,6 +19,7 @@ entity i2s is
         CLK_AVL     : in  std_logic;
         ARST_AVL_N  : in  std_logic;
         SRST_I2S    : in  std_logic;
+        CONFIG      : in  std_logic_vector(1 downto 0);
         SAMPLE_EN   : out std_logic;
         SAMPLE_DATA : out std_logic_vector(31 downto 0);
         LRCK_CNT    : out std_logic_vector(31 downto 0);
@@ -89,13 +90,16 @@ begin
                 case (state) is
                     when E_RESET =>
                         if (i2s_lrck_left = '1') then
-                            state           <= E_CAPTURE;
-                            sample_data_i2s <= I2S_DATA & sample_data_i2s(31 downto 1);
-                            i2s_shift_cnt   <= i2s_shift_cnt + 1;
+                            state <= E_CAPTURE;
+                            if (CONFIG = "01") then -- 01 is msb standard, 00 is Philips standard
+                                sample_data_i2s <= sample_data_i2s(30 downto 0) & I2S_DATA;
+                                i2s_shift_cnt   <= i2s_shift_cnt + 1;
+                            end if;
                         end if;
 
                     when E_CAPTURE =>
-                        sample_data_i2s <= I2S_DATA & sample_data_i2s(31 downto 1);
+                        --sample_data_i2s <= I2S_DATA & sample_data_i2s(31 downto 1);
+                        sample_data_i2s <= sample_data_i2s(30 downto 0) & I2S_DATA;
                         i2s_shift_cnt   <= i2s_shift_cnt + 1; -- rollover
                         if (i2s_shift_cnt = 31) then
                             sample_en_i2s <= '1';
